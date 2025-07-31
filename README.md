@@ -62,6 +62,6 @@ python app.py
 
 联系方式
 - GitHub: @Ywh
-- 邮箱: 
+- 邮箱: lllzguge22@gmail.com
 ### 贡献说明
 欢迎提交Issue和Pull Request来改进项目，但请确保贡献的内容也遵守相同的非商业使用许可。
