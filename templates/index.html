@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok_Ani_最会跳舞的Ani</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+
+        #viewer {
+            width: 100%;
+            height: 100%;
+            background-color: #ffffff;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+        }
+
+        #userInfoDialog {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px 25px;
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            width: 600px;
+            box-sizing: border-box;
+        }
+
+        #userInfoInput {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            min-width: 300px;
+            background: rgba(255, 255, 255, 0.9);
+            transition: all 0.3s ease;
+        }
+
+        #userInfoInput:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+        }
+
+        #chatWithAIBtn {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(76, 175, 80, 0.3);
+        }
+
+        #chatWithAIBtn:hover {
+            background: linear-gradient(135deg, #45a049, #3d8b40);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        #chatWithAIBtn:active {
+            transform: translateY(0);
+        }
+
+        #userInfoStatus {
+            font-size: 14px;
+            color: #666;
+            margin-left: 10px;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        /* 隐藏状态 */
+        .hidden {
+            display: none !important;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 1900px) {
+            #userInfoDialog {
+                width: 90%;
+                bottom: 20px;
+                padding: 15px 20px;
+            }
+
+            #userInfoInput {
+                min-width: auto;
+                padding: 10px 14px;
+                font-size: 14px;
+            }
+
+            #chatWithAIBtn {
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="viewer">
+            <div class="loading">正在加载模型...</div>
+        </div>
+    </div>
+
+    <!-- 用户信息对话框 -->
+    <div id="userInfoDialog">
+        <input type="text" id="userInfoInput" placeholder="与AI对话...">
+        <button id="chatWithAIBtn">发送</button>
+        <div id="userInfoStatus"></div>
+    </div>
+
+    <!-- 使用MMD查看器 -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
+        import { MMDAnimationHelper } from 'three/addons/animation/MMDAnimationHelper.js';
+
+        let scene, camera, renderer, controls;
+        let model, helper;
+        let gridHelper;
+        let isPlaying = true;
+        let clock = new THREE.Clock();
+
+        // 音频相关变量
+        let currentAudio = null;
+        let currentAnimation = null;
+        let isSwitchingToStand = false; // 防止重复切换标志
+
+        // 保存模型的初始状态
+        let initialModelState = {
+            position: null,
+            rotation: null,
+            scale: null,
+            boneStates: new Map()
+        };
+
+        // 动作映射表（用于音乐文件匹配）
+        const actionMusicMapping = {
+            'dance1.vmd': 'dance1.mp3',
+            'dance2.vmd': 'dance2.mp3',
+            'dance3.vmd': 'dance3.mp3',
+            'dance4.vmd': 'dance4.mp3',
+            'dance5.vmd': 'dance5.mp3',
+            'stand.vmd': null
+        };
+
+        function init() {
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xdddddd);
+
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(45, document.getElementById('viewer').offsetWidth / document.getElementById('viewer').offsetHeight, 0.1, 5000);
+            camera.position.set(0, 15, 35);
+
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(document.getElementById('viewer').offsetWidth,
+                           document.getElementById('viewer').offsetHeight);
+            renderer.setClearColor(0xcccccc, 1);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // 清空viewer容器并添加renderer
+            document.getElementById('viewer').innerHTML = '';
+            document.getElementById('viewer').appendChild(renderer.domElement);
+
+            // 添加光源 - 更明亮的光照设置
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+            scene.add(ambientLight);
+
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight1.position.set(5, 5, 5);
+            directionalLight1.castShadow = true;
+            directionalLight1.shadow.mapSize.width = 2048;
+            directionalLight1.shadow.mapSize.height = 2048;
+            directionalLight1.shadow.camera.near = 0.5;
+            directionalLight1.shadow.camera.far = 50;
+            directionalLight1.shadow.camera.left = -20;
+            directionalLight1.shadow.camera.right = 20;
+            directionalLight1.shadow.camera.top = 20;
+            directionalLight1.shadow.camera.bottom = -20;
+            scene.add(directionalLight1);
+
+            // 添加底部光源
+            const topLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            topLight.position.set(0, 0, 0);
+            scene.add(topLight);
+
+            // 创建无限延展的网格
+            createInfiniteGrid();
+
+            // 创建控制器
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+            controls.maxPolarAngle = Math.PI * 0.9;
+
+            // 创建动画辅助器 - 禁用物理引擎避免ammo.js错误
+            helper = new MMDAnimationHelper({
+                afterglow: 2.0,
+                physics: false  // 关闭物理引擎
+            });
+
+            // 加载PMX模型
+            loadModel();
+
+            // 动画循环
+            function animate() {
+                requestAnimationFrame(animate);
+                if (controls) controls.update();
+                if (helper) helper.update(clock.getDelta());
+                renderer.render(scene, camera);
+            }
+
+            animate();
+
+            // 窗口大小调整
+            window.addEventListener('resize', onWindowResize, false);
+
+            // 绑定AI对话事件
+            bindAIEvents();
+
+            // 初始化语音
+            initSpeechSynthesis();
+        }
+
+        function showStatus(message, color) {
+            const statusElement = document.getElementById('userInfoStatus');
+            statusElement.textContent = message;
+            statusElement.style.color = color;
+        }
+
+        // 初始化语音合成
+        function initSpeechSynthesis() {
+            if ('speechSynthesis' in window) {
+                setTimeout(() => {
+                    window.speechSynthesis.getVoices();
+                }, 500);
+            }
+        }
+
+        // 绑定AI事件
+        function bindAIEvents() {
+            document.getElementById('chatWithAIBtn').addEventListener('click', chatWithAI);
+
+            // 回车键发送消息
+            document.getElementById('userInfoInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    chatWithAI();
+                }
+            });
+        }
+
+        // AI对话功能
+        async function chatWithAI() {
+            const userInfo = document.getElementById('userInfoInput').value.trim();
+            const statusElement = document.getElementById('userInfoStatus');
+
+            if (!userInfo) {
+                showStatus('请输入信息', 'red');
+                return;
+            }
+
+            try {
+                showStatus('思考中...', 'orange');
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: userInfo
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    const aiResponse = result.response;
+
+                    try {
+                        // 解析AI返回的JSON
+                        const aiData = JSON.parse(aiResponse);
+                        const action = aiData.action || 'stand.vmd';
+                        const content = aiData.centent || '好的';
+
+                        // 不显示AI回复文本，只播放语音和动作
+                        showStatus('正在处理...', 'green');
+
+                        // 播放对应的动画
+                        await playActionAnimation(action);
+
+                        // 播放语音内容
+                        speakText(content);
+
+                        // 清空输入框
+                        document.getElementById('userInfoInput').value = '';
+
+                    } catch (parseError) {
+                        console.error('JSON解析失败:', parseError);
+                        // 如果解析失败，当作普通文本处理
+                        showStatus('处理中...', 'green');
+                        speakText(aiResponse);
+                    }
+
+                } else {
+                    throw new Error(result.error || 'AI回复失败');
+                }
+
+            } catch (error) {
+                showStatus('对话失败', 'red');
+                console.error('AI对话失败:', error);
+            }
+
+            // 5秒后清除状态提示
+            setTimeout(() => {
+                statusElement.textContent = '';
+            }, 5000);
+        }
+
+        // 保存模型初始状态
+        function saveInitialModelState() {
+            if (!model) return;
+
+            initialModelState.position = model.position.clone();
+            initialModelState.rotation = model.rotation.clone();
+            initialModelState.scale = model.scale.clone();
+
+            // 保存所有骨骼的初始状态
+            if (model.skeleton && model.skeleton.bones) {
+                initialModelState.boneStates.clear();
+                model.skeleton.bones.forEach((bone, index) => {
+                    initialModelState.boneStates.set(index, {
+                        position: bone.position.clone(),
+                        rotation: bone.rotation.clone(),
+                        quaternion: bone.quaternion.clone(),
+                        scale: bone.scale.clone()
+                    });
+                });
+            }
+
+            console.log('初始模型状态已保存');
+        }
+
+        // 完全重置模型到初始状态
+        function resetModelToInitialState() {
+            if (!model || !initialModelState.position) return;
+
+            console.log('重置模型到初始状态...');
+
+            // 重置模型根节点
+            model.position.copy(initialModelState.position);
+            model.rotation.copy(initialModelState.rotation);
+            model.scale.copy(initialModelState.scale);
+
+            // 重置所有骨骼状态
+            if (model.skeleton && model.skeleton.bones && initialModelState.boneStates.size > 0) {
+                model.skeleton.bones.forEach((bone, index) => {
+                    const initialBoneState = initialModelState.boneStates.get(index);
+                    if (initialBoneState) {
+                        bone.position.copy(initialBoneState.position);
+                        bone.rotation.copy(initialBoneState.rotation);
+                        bone.quaternion.copy(initialBoneState.quaternion);
+                        bone.scale.copy(initialBoneState.scale);
+                    }
+                });
+
+                // 更新骨骼矩阵
+                model.skeleton.update();
+            }
+
+            // 更新模型矩阵
+            model.updateMatrix();
+            model.updateMatrixWorld(true);
+
+            console.log('模型状态重置完成');
+        }
+
+        // 播放动作动画 - 只播放一遍后回到默认动作
+        async function playActionAnimation(actionFile) {
+            try {
+                console.log('准备播放动作:', actionFile);
+
+                // 如果正在切换到stand状态，则不处理新的动作请求
+                if (isSwitchingToStand) {
+                    console.log('正在切换到stand状态，忽略新的动作请求');
+                    return;
+                }
+
+                // 停止当前音乐
+                stopCurrentMusic();
+
+                // 停止当前动画播放
+                pauseAnimation();
+
+                // 先完全重置模型到初始状态
+                resetModelToInitialState();
+
+                // 等待一帧确保重置生效
+                await new Promise(resolve => requestAnimationFrame(resolve));
+
+                // 如果模型已经添加到helper中，先移除它
+                if (helper && model) {
+                    try {
+                        if (helper.objects.get(model)) {
+                            console.log('移除旧的动画绑定...');
+                            helper.remove(model);
+                        }
+                    } catch (e) {
+                        console.log('移除旧动画时出错:', e);
+                    }
+                }
+
+                // 再次重置模型状态（确保清理完全）
+                resetModelToInitialState();
+
+                // 加载新的动画
+                const animation = await loadVMDAnimation(`./action/${actionFile}`);
+
+                // 查找对应的音乐文件
+                const musicFile = actionMusicMapping[actionFile];
+                if (musicFile) {
+                    loadAndPlayMusic(`./music/${musicFile}`);
+                }
+
+                // 开始播放动画
+                resumeAnimation();
+
+                console.log(`动作 ${actionFile} 加载完成`);
+                currentAnimation = actionFile;
+
+                // 如果不是stand动作，则设置完成后切换回stand
+                if (actionFile !== 'stand.vmd') {
+                    setupSinglePlayCompleteListener(animation);
+                }
+
+            } catch (error) {
+                console.error('加载动作失败:', error);
+                // 如果动作加载失败，尝试恢复到初始状态
+                resetModelToInitialState();
+            }
+        }
+
+        // 设置单次播放完成监听器
+        function setupSinglePlayCompleteListener(animation) {
+            if (!helper || !model || !animation) return;
+
+            const modelInfo = helper.objects.get(model);
+            if (!modelInfo || !modelInfo.mixer) return;
+
+            const mixer = modelInfo.mixer;
+            const animationDuration = animation.duration;
+
+            console.log(`动画时长: ${animationDuration} 秒`);
+
+            // 清除之前的定时器（如果存在）
+            if (window.animationEndTimer) {
+                clearTimeout(window.animationEndTimer);
+            }
+
+            // 设置动画完成后的回调
+            window.animationEndTimer = setTimeout(async () => {
+                console.log('动作播放完成，切换到默认站立动作');
+                await switchToStandAction();
+            }, animationDuration * 1000);
+        }
+
+        // 切换到站立动作
+        async function switchToStandAction() {
+            // 防止重复切换
+            if (isSwitchingToStand) {
+                return;
+            }
+
+            isSwitchingToStand = true;
+
+            try {
+                console.log('正在切换到默认站立动作...');
+
+                // 停止当前音乐
+                stopCurrentMusic();
+
+                // 停止当前动画播放
+                pauseAnimation();
+
+                // 完全重置模型到初始状态
+                resetModelToInitialState();
+
+                // 等待一帧确保重置生效
+                await new Promise(resolve => requestAnimationFrame(resolve));
+
+                // 如果模型已经添加到helper中，先移除它
+                if (helper && model) {
+                    try {
+                        if (helper.objects.get(model)) {
+                            helper.remove(model);
+                        }
+                    } catch (e) {
+                        console.log('移除旧动画时出错:', e);
+                    }
+                }
+
+                // 再次重置模型状态
+                resetModelToInitialState();
+
+                // 加载站立动画
+                await loadVMDAnimation('./action/stand.vmd');
+
+                // 开始播放动画
+                resumeAnimation();
+
+                currentAnimation = 'stand.vmd';
+                console.log('默认站立动作加载完成');
+
+                // 重置切换标志
+                isSwitchingToStand = false;
+
+            } catch (error) {
+                console.error('切换到站立动作失败:', error);
+                resetModelToInitialState();
+                isSwitchingToStand = false;
+            }
+        }
+
+        // 文字转语音功能
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.1;
+                utterance.pitch = 1.4;
+                utterance.volume = 0.9;
+
+                const voices = window.speechSynthesis.getVoices();
+
+                // 精确匹配优先级列表
+                const voicePriorityList = [
+                    // 第一优先级：晓晓语音（精确匹配）
+                    "Microsoft 晓晓 Online (Natural) - Chinese (Mandarin, Simplified)",
+
+                    // 第二优先级：其他晓系列女声（精确匹配）
+                    "Microsoft 晓甄 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓彤 Online (Natural) - Chinese (Wu, Simplified)",
+                    "Microsoft 晓敏 Online (Natural) - Chinese (Cantonese, Simplified)",
+                    "Microsoft 晓伊 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓辰 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓涵 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓梦 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓墨 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓秋 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓柔 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓睿 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓双 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓颜 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓悠 Online (Natural) - Chinese (Mandarin, Simplified)",
+                    "Microsoft 晓曼 Online (Natural) - Chinese (Cantonese, Traditional)",
+                    "Microsoft 晓臻 Online (Natural) - Chinese (Taiwanese Mandarin, Traditional)",
+                    "Microsoft 晓雨 Online (Natural) - Chinese (Taiwanese Mandarin, Traditional)",
+
+                    // 第三优先级：微软其他甜美女声（精确匹配）
+                    "Microsoft Yaoyao - Chinese (Simplified, PRC)",
+                    "Microsoft Yunxiao Multilingual Online (Natural) - Chinese (Mandarin, Simplified)",
+                ];
+
+                let selectedVoice = null;
+                let selectedVoiceName = "";
+
+                // 按优先级查找
+                for (let preferredVoiceName of voicePriorityList) {
+                    const voice = voices.find(v => v.name === preferredVoiceName);
+                    if (voice) {
+                        selectedVoice = voice;
+                        selectedVoiceName = preferredVoiceName;
+                        break;
+                    }
+                }
+
+                if (selectedVoice) {
+                    utterance.voice = selectedVoice;
+                    if (selectedVoiceName.includes('晓晓')) {
+                        console.log('✓ 使用微软晓晓语音:', selectedVoice.name);
+                    } else if (selectedVoiceName.includes('晓')) {
+                        console.log('✓ 使用微软晓系列语音:', selectedVoice.name);
+                    } else {
+                        console.log('✓ 使用微软中文女声:', selectedVoice.name);
+                    }
+                } else {
+                    // 如果精确匹配都找不到，寻找其他中文女声
+                    const fallbackVoices = voices.filter(voice =>
+                        voice.lang.includes('zh') &&
+                        (voice.name.includes('Female') || voice.name.includes('女') || voice.name.includes('Yaoyao'))
+                    );
+
+                    if (fallbackVoices.length > 0) {
+                        selectedVoice = fallbackVoices[0];
+                        utterance.voice = selectedVoice;
+                        console.log('⚠ 使用备选中文女声:', selectedVoice.name);
+                    } else {
+                        // 最后备选方案
+                        utterance.lang = 'zh-CN';
+                        console.log('⚠ 使用系统默认中文设置');
+                    }
+                }
+
+                window.speechSynthesis.speak(utterance);
+                console.log('开始播放语音:', text);
+            } else {
+                console.warn('当前浏览器不支持语音合成');
+            }
+        }
+
+
+        function loadModel() {
+            const loader = new MMDLoader();
+
+            // 先加载模型
+            loader.load('./model/Grok - Ms.Ani.pmx', function (mesh) {
+                model = mesh;
+
+                // 设置模型位置和缩放
+                model.position.set(0, 0, 0);
+                model.scale.set(1, 1, 1);
+
+                // 修复模型倾斜问题 - 重置旋转
+                model.rotation.set(0, 0, 0);
+
+                // 启用阴影
+                model.traverse(function (object) {
+                    if (object.isMesh) {
+                        object.castShadow = true;
+                        object.receiveShadow = true;
+                    }
+                });
+
+                scene.add(model);
+                console.log('模型加载成功');
+
+                // 调整相机焦点到模型中心
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                controls.target.copy(center);
+                controls.update();
+
+                // 隐藏加载提示
+                document.querySelector('.loading')?.remove();
+
+                // 等待模型完全加载后保存初始状态
+                setTimeout(() => {
+                    saveInitialModelState();
+
+                    // 启动默认站立动画
+                    setTimeout(async function() {
+                        try {
+                            console.log('启动默认站立动画...');
+                            await playStandAnimation();
+                            console.log('默认站立动画启动完成');
+                        } catch (error) {
+                            console.error('启动默认动画失败:', error);
+                        }
+                    }, 500);
+                }, 1000);
+
+            }, undefined, function (error) {
+                console.error('模型加载失败:', error);
+                document.getElementById('viewer').innerHTML = '<div class="loading" style="color: red;">模型加载失败，请检查文件路径和格式</div>';
+            });
+        }
+
+        // 播放默认站立动作（初始化用）
+        async function playStandAnimation() {
+            try {
+                console.log('加载默认站立动画...');
+
+                // 如果模型已经添加到helper中，先移除它
+                if (helper && model) {
+                    try {
+                        if (helper.objects.get(model)) {
+                            helper.remove(model);
+                        }
+                    } catch (e) {
+                        console.log('移除旧动画时出错:', e);
+                    }
+                }
+
+                // 加载站立动画
+                await loadVMDAnimation('./action/stand.vmd');
+
+                // 开始播放动画
+                resumeAnimation();
+
+                currentAnimation = 'stand.vmd';
+                console.log('默认站立动画加载完成');
+
+            } catch (error) {
+                console.error('加载站立动作失败:', error);
+                resetModelToInitialState();
+            }
+        }
+
+        // 加载VMD动画文件（返回Promise） - 改进版本
+        function loadVMDAnimation(animationPath) {
+            return new Promise((resolve, reject) => {
+                const loader = new MMDLoader();
+
+                // 加载新的动画
+                loader.loadAnimation(animationPath, model, function (animation) {
+                    console.log('动画加载成功:', animationPath);
+
+                    try {
+                        // 重新添加模型和新动画到辅助器 - 禁用物理引擎
+                        helper.add(model, {
+                            animation: animation,
+                            physics: false  // 关闭物理引擎避免错误
+                        });
+
+                        // 获取新添加的mixer并重置时间
+                        const modelInfo = helper.objects.get(model);
+                        if (modelInfo && modelInfo.mixer) {
+                            // 重置mixer时间到0
+                            modelInfo.mixer.setTime(0);
+                            modelInfo.mixer.timeScale = 1.0;
+
+                            // 立即更新一次以应用初始状态
+                            modelInfo.mixer.update(0);
+                        }
+
+                        resolve(animation);
+                    } catch (error) {
+                        console.error('添加动画到helper时出错:', error);
+                        reject(error);
+                    }
+                }, undefined, function (error) {
+                    console.error('动画加载失败:', error);
+                    reject(error);
+                });
+            });
+        }
+
+        // 暂停动画播放
+        function pauseAnimation() {
+            if (helper && model) {
+                const modelInfo = helper.objects.get(model);
+                if (modelInfo && modelInfo.mixer) {
+                    modelInfo.mixer.timeScale = 0;
+                }
+            }
+            isPlaying = false;
+        }
+
+        // 修改音乐播放函数 - 只播放一遍
+        function loadAndPlayMusic(musicPath) {
+            try {
+                // 停止当前音乐
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+
+                // 创建新的音频对象
+                currentAudio = new Audio(musicPath);
+                currentAudio.volume = 0.5;
+                currentAudio.loop = false; // 不循环播放
+
+                // 监听音频播放结束事件
+                currentAudio.addEventListener('ended', function() {
+                    console.log('音频播放结束');
+                    // 音频结束时也触发切换到stand动作
+                    if (currentAnimation !== 'stand.vmd') {
+                        switchToStandAction();
+                    }
+                });
+
+                // 播放音乐
+                currentAudio.play().catch(function(error) {
+                    console.log('音乐播放失败:', error);
+                });
+
+            } catch (error) {
+                console.error('音乐加载失败:', error);
+            }
+        }
+
+        // 恢复动画播放
+        function resumeAnimation() {
+            if (helper && model) {
+                const modelInfo = helper.objects.get(model);
+                if (modelInfo && modelInfo.mixer) {
+                    modelInfo.mixer.timeScale = 1.0;
+                }
+            }
+            isPlaying = true;
+        }
+
+        // 修改停止音乐函数
+        function stopCurrentMusic() {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+        }
+
+        function createInfiniteGrid() {
+            const gridSize = 100;
+            const gridDivisions = 100;
+            const gridColor = 0x888888;
+            const centerColor = 0x444444;
+
+            gridHelper = new THREE.GridHelper(gridSize, gridDivisions, centerColor, gridColor);
+            gridHelper.material.opacity = 0.3;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+        }
+
+        function onWindowResize() {
+            camera.aspect = document.getElementById('viewer').offsetWidth / document.getElementById('viewer').offsetHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(document.getElementById('viewer').offsetWidth, document.getElementById('viewer').offsetHeight);
+        }
+
+        // 用户交互时初始化语音
+        document.body.addEventListener('click', function() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.getVoices();
+            }
+        }, { once: true });
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>
