@@ -11,7 +11,7 @@
 - 🔇 多种动作设计
 
 ## 演示视频
-<video src="./Ani.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/bdb42c48-7ce3-4ac8-896b-a757c392242f" controls width="100%"></video>
 
 
 ## 使用说明
