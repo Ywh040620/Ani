@@ -10,6 +10,10 @@
 - 📱 响应式设计
 - 🔇 多种动作设计
 
+## 演示视频
+<video src="./Ani.mp4" controls width="100%"></video>
+
+
 ## 使用说明
 ```bash
 # 下载Qwen3，安装依赖
